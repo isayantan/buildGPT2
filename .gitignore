@@ -1,0 +1,53 @@
+### Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# PyInstaller
+*.spec
+
+# Unit test / coverage reports
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Jupyter
+.ipynb_checkpoints
+
+### General build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+### Logs and databases
+*.log
+*.sqlite3
+*.db
+
+### OS files
+.DS_Store
+Thumbs.db
+
+### Editor and IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+
+### Python bytecode in nested dirs
+**/__pycache__/
+

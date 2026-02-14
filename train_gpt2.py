@@ -34,7 +34,7 @@ class CausalSelfAttention(nn.Module):
         att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf'))
         att = F.softmax(att, dim = -1)
         y = att @ v
-        y = y.transpose(1, 2).contiguous.view(B, T, C)
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
         # output projection
         y = self.c_proj(y)
         return y
@@ -104,12 +104,12 @@ class GPT(nn.Module):
             x = block(x)
         # forward the final layernorm and classifier
         x = self.transformer.ln_f(x)
-        logits = self.lm_head(x)  # (B, T, vocab_size)
+        logits = self.lm_head(x)   # (B, T, vocab_size)
         return logits
 
 
     @classmethod
-    def from_method(cls, model_type):
+    def from_pretrained(cls, model_type):
         """
         Loads pretrained GPT-2 weights from huggingface
         """
@@ -139,8 +139,8 @@ class GPT(nn.Module):
 
         # copy while ensuring all of the parameters are aligned and match in names and shapes
         sd_keys_hf = sd_hf.keys()
-        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')]
-        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')]
+        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')]      # discard buffer masked bias
+        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')]             # discard buffer bias
         transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
         
         assert len(sd_keys_hf) == len(sd_keys), f"mismatched key: {len(sd_keys_hf)} != {len(sd_keys)}"
@@ -158,7 +158,52 @@ class GPT(nn.Module):
 
         return model 
 
-model = GPT.from_method('gpt2')
-print("didn't crash!")
+# ------------------------------------------------------------------
+num_return_sequences = 5
+max_length = 30
+device = 'cuda:2'
+
+# model = GPT.from_pretrained('gpt2')
+model = GPT(GPTConfig())
+model.eval()
+model.to(device)
+
+# prefix tokens
+import tiktoken
+enc = tiktoken.get_encoding('gpt2')
+tokens = enc.encode("Hello, I'm a languange model,")
+tokens = torch.tensor(tokens, dtype = torch.long)  # (8, )
+tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1) # (5, 8)
+x = tokens.to(device)
+
+# generate! right now x is (B, T) where B = 5, T = 8
+# set seed to 42
+torch.manual_seed(42)
+torch.cuda.manual_seed(42)
+while x.size(1) < max_length:
+    # forward the model to get the logits
+    with torch.no_grad():
+        logits = model(x)  # (B, T, vocab_size)
+        # get the logit at last position
+        logits = logits[:, -1, :]  # (B, vocab_size)
+        # get prob
+        probs = F.softmax(logits, dim = -1)
+        # do top-k sampling of 50
+        # topk_probs here becomes (5, 50), topk_indices is (5, 50)
+        topk_probs, topk_indices = torch.topk(probs, 50, dim = -1)
+        # select a token from the top-k probs
+        ix = torch.multinomial(topk_probs, 1) # (B, 1)
+        # gather the corresponding indices
+        xcol = torch.gather(topk_indices, -1, ix)
+        # append to seq
+        x = torch.cat((x, xcol), dim = 1)
+
+# print the generated seq
+for i in range(num_return_sequences):
+    tokens = x[i, :max_length].tolist()
+    decoded = enc.decode(tokens)
+    print(">", decoded)
+
+
 
 

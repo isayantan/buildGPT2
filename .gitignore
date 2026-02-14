@@ -30,6 +30,9 @@ dist/
 *.egg-info/
 *.egg
 
+### Data
+data/
+
 ### Logs and databases
 *.log
 *.sqlite3

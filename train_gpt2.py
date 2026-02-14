@@ -159,50 +159,70 @@ class GPT(nn.Module):
         return model 
 
 # ------------------------------------------------------------------
-num_return_sequences = 5
-max_length = 30
-device = 'cuda:2'
+device = "cpu"
 
-# model = GPT.from_pretrained('gpt2')
-model = GPT(GPTConfig())
-model.eval()
-model.to(device)
-
-# prefix tokens
+# get a batch
 import tiktoken
 enc = tiktoken.get_encoding('gpt2')
-tokens = enc.encode("Hello, I'm a languange model,")
-tokens = torch.tensor(tokens, dtype = torch.long)  # (8, )
-tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1) # (5, 8)
-x = tokens.to(device)
+with open('data/tiny_shakespeare.txt', 'r') as f:
+    text = f.read()
+text = text[:1000]
+tokens = enc.encode(text)
+B, T = 4, 32
+buf = torch.tensor(tokens[: B*T + 1])
+x, y = buf[:-1].view(B, T), buf[1:].view(B, T)
 
-# generate! right now x is (B, T) where B = 5, T = 8
-# set seed to 42
-torch.manual_seed(42)
-torch.cuda.manual_seed(42)
-while x.size(1) < max_length:
-    # forward the model to get the logits
-    with torch.no_grad():
-        logits = model(x)  # (B, T, vocab_size)
-        # get the logit at last position
-        logits = logits[:, -1, :]  # (B, vocab_size)
-        # get prob
-        probs = F.softmax(logits, dim = -1)
-        # do top-k sampling of 50
-        # topk_probs here becomes (5, 50), topk_indices is (5, 50)
-        topk_probs, topk_indices = torch.topk(probs, 50, dim = -1)
-        # select a token from the top-k probs
-        ix = torch.multinomial(topk_probs, 1) # (B, 1)
-        # gather the corresponding indices
-        xcol = torch.gather(topk_indices, -1, ix)
-        # append to seq
-        x = torch.cat((x, xcol), dim = 1)
+# get logits
+model = GPT(GPTConfig())
+model.to(device)
+logits = model(x)
 
-# print the generated seq
-for i in range(num_return_sequences):
-    tokens = x[i, :max_length].tolist()
-    decoded = enc.decode(tokens)
-    print(">", decoded)
+print(logits.shape)
+
+# num_return_sequences = 5
+# max_length = 30
+# device = 'cuda:2'
+
+# # model = GPT.from_pretrained('gpt2')
+# model = GPT(GPTConfig())
+# model.eval()
+# model.to(device)
+
+# # prefix tokens
+# import tiktoken
+# enc = tiktoken.get_encoding('gpt2')
+# tokens = enc.encode("Hello, I'm a languange model,")
+# tokens = torch.tensor(tokens, dtype = torch.long)  # (8, )
+# tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1) # (5, 8)
+# x = tokens.to(device)
+
+# # generate! right now x is (B, T) where B = 5, T = 8
+# # set seed to 42
+# torch.manual_seed(42)
+# torch.cuda.manual_seed(42)
+# while x.size(1) < max_length:
+#     # forward the model to get the logits
+#     with torch.no_grad():
+#         logits = model(x)  # (B, T, vocab_size)
+#         # get the logit at last position
+#         logits = logits[:, -1, :]  # (B, vocab_size)
+#         # get prob
+#         probs = F.softmax(logits, dim = -1)
+#         # do top-k sampling of 50
+#         # topk_probs here becomes (5, 50), topk_indices is (5, 50)
+#         topk_probs, topk_indices = torch.topk(probs, 50, dim = -1)
+#         # select a token from the top-k probs
+#         ix = torch.multinomial(topk_probs, 1) # (B, 1)
+#         # gather the corresponding indices
+#         xcol = torch.gather(topk_indices, -1, ix)
+#         # append to seq
+#         x = torch.cat((x, xcol), dim = 1)
+
+# # print the generated seq
+# for i in range(num_return_sequences):
+#     tokens = x[i, :max_length].tolist()
+#     decoded = enc.decode(tokens)
+#     print(">", decoded)
 
 
 

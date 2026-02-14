@@ -18,7 +18,8 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
 
-        self.register_buffer("bias", )
+        self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
+                                    .view(1, 1, config.block_size, config.block_size))
 
     def forward(self, x):
         B, T, C = x.size()   # batch size, sequence length, embedding dimensionality
@@ -40,10 +41,10 @@ class CausalSelfAttention(nn.Module):
 
 class MLP(nn.Module):
     def __init__(self, config):
-        super.__init__()
+        super().__init__()
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.gelu = nn.GELU(approximate = 'tanh')
-        self.c_proj = nn.Linear(4 * config.n_embd)
+        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -55,7 +56,7 @@ class Block(nn.Module):
     
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = nn.Layernorm(config.n_embd)
+        self.ln_1 = nn.LayerNorm(config.n_embd)
         self.attn = CausalSelfAttention(config)
         self.ln_2 = nn.LayerNorm(config.n_embd)
         self.mlp = MLP(config)
@@ -71,8 +72,8 @@ class GPTConfig:
 
     vocab_size: int = 50257                # no of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|>
     block_size: int = 1024                 # context length
-    n_layers: int = 12                    
-    n_heads: int = 12
+    n_layer: int = 12                    
+    n_head: int = 12
     n_embd: int = 768
 
 class GPT(nn.Module):
@@ -84,7 +85,7 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
-            h = nn.ModuleList([Block(config)] for _ in range(config.n_layer)),
+            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = nn.LayerNorm(config.n_embd),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias = False)
@@ -113,10 +114,51 @@ class GPT(nn.Module):
         Loads pretrained GPT-2 weights from huggingface
         """
         assert model_type in {"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"}
+        from transformers import GPT2LMHeadModel
+        print("loading weights from the pretrained gpt: %s" % model_type)
 
+        # n_layer, n_head, n_embd are determined from model_type
+        config_args = {
+            'gpt2': dict(n_layer = 12, n_head = 12, n_embd = 768),  # 124M params
+            'gpt2-medium': dict(n_layer = 24, n_head = 16, n_embd = 1024), # 350M
+            'gpt2-large': dict(n_layer = 36, n_head = 20, n_embd = 11280), # 774M
+            'gpt2-xl': dict(n_layer = 40, n_head = 25, n_embd = 1600),
+        }[model_type]
+        config_args['vocab_size'] = 50257 # always 50257 for GPT2 checkpoints
+        config_args['block_size'] = 1024  # always 1024 context length for GPT2 checkpoints
+        # create a from-scratch GPT model
+        config = GPTConfig(**config_args)
+        model = GPT(config)
+        sd = model.state_dict()
+        sd_keys = sd.keys()
+        sd_keys = [k for k in sd_keys if not k.endswith('.attn.bias')] # discard this mask / buffer
+        
+        # init a huggingface/transformers model
+        model_hf = GPT2LMHeadModel.from_pretrained(model_type)
+        sd_hf = model_hf.state_dict()
 
+        # copy while ensuring all of the parameters are aligned and match in names and shapes
+        sd_keys_hf = sd_hf.keys()
+        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')]
+        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')]
+        transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
+        
+        assert len(sd_keys_hf) == len(sd_keys), f"mismatched key: {len(sd_keys_hf)} != {len(sd_keys)}"
+        for k in sd_keys_hf:
+            if any(k.endswith(w) for w in transposed):
+                # transpose the Conv1D weights
+                assert sd_hf[k].shape[::-1] == sd[k].shape
+                with torch.no_grad():
+                    sd[k].copy_(sd_hf[k].t())
+            else:
+                # copy the other weights
+                assert sd_hf[k].shape == sd[k].shape
+                with torch.no_grad():
+                    sd[k].copy_(sd_hf[k])
 
+        return model 
 
-        return 
+model = GPT.from_method('gpt2')
+print("didn't crash!")
 
 

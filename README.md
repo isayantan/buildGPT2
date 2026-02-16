@@ -1,2 +1,90 @@
-# buildGPT2
-Building GPT2 from scratch
+# GPT-2 Training with PyTorch
+
+This repository contains a PyTorch implementation for training a GPT-2-like language model. The training script (`train_gpt2.py`) is designed to be efficient and leverages modern techniques such as mixed precision training, fused optimizers, and learning rate scheduling.
+
+## Features
+- **Custom GPT-2 Implementation**: The model is implemented from scratch, including components like self-attention, MLP, and layer normalization.
+- **Flash Attention**: Implements efficient attention computation using PyTorch's `scaled_dot_product_attention` function. This method reduces memory usage and speeds up training by avoiding the need to explicitly compute and store large attention matrices. It is particularly useful for long sequences and modern GPUs.
+- **Mixed Precision Training**: Utilizes `torch.autocast` with `bfloat16` for faster training on modern GPUs.
+- **Fused AdamW Optimizer**: Dynamically enables fused kernels for the AdamW optimizer if supported by the hardware.
+- **Learning Rate Scheduler**: Implements a warmup and cosine decay learning rate schedule.
+- **Gradient Clipping**: Prevents exploding gradients by clipping the gradient norm.
+
+## Requirements
+- Python 3.8+
+- PyTorch 2.0+
+- A CUDA-enabled GPU (Ampere or newer recommended for optimal performance)
+
+Install the required dependencies:
+```bash
+pip install torch torchvision tiktoken
+```
+
+## File Structure
+- `train_gpt2.py`: Main training script.
+- `data/tiny_shakespeare.txt`: Example dataset for training.
+- `README.md`: Project documentation.
+
+## Usage
+### Training the Model
+To train the model, run the following command:
+```bash
+python train_gpt2.py
+```
+
+### Key Configurations
+- **Batch Size**: Set in the `DataLoaderLite` class (`B` parameter).
+- **Sequence Length**: Set in the `DataLoaderLite` class (`T` parameter).
+- **Learning Rate**: Configured in the `configure_optimizers` method.
+- **Model Architecture**: Defined in the `GPTConfig` class.
+
+### Example Output
+During training, the script will log the following metrics:
+- **Loss**: Cross-entropy loss for the language modeling task.
+- **Gradient Norm**: The norm of the gradients after clipping.
+- **Tokens per Second**: Throughput in tokens processed per second.
+- **Time per Step**: Time taken for each training step.
+
+Example log:
+```
+step 0 | loss: 10.9355 | norm: 0.9876 | time: 1917.00ms | tok/sec: 8546.68
+step 1 | loss: 9.8765 | norm: 0.8765 | time: 1800.00ms | tok/sec: 9000.00
+```
+
+## Model Details
+### GPT Architecture
+- **Embedding Size**: 768
+- **Number of Layers**: 12
+- **Number of Attention Heads**: 12
+- **Context Length**: 1024 tokens
+
+### Optimizer
+- **AdamW**: Includes weight decay for regularization.
+- **Fused Kernels**: Enabled if supported by the hardware for faster training.
+
+### Learning Rate Schedule
+- **Warmup Steps**: Gradual increase in learning rate for the first few steps.
+- **Cosine Decay**: Smooth decay of learning rate after the warmup phase.
+
+## Dataset
+The training script uses the `tiny_shakespeare.txt` dataset as an example. Replace this file with your own dataset for custom training. Ensure the dataset is a plain text file.
+
+## Performance Optimization
+- **Mixed Precision**: Reduces memory usage and speeds up training using `bfloat16`.
+- **Fused Optimizer**: Reduces kernel launch overhead and improves efficiency.
+- **Gradient Clipping**: Stabilizes training by preventing exploding gradients.
+- **Flash Attention**: Implements efficient attention computation using PyTorch's `scaled_dot_product_attention` function. This method reduces memory usage and speeds up training by avoiding the need to explicitly compute and store large attention matrices. It is particularly useful for long sequences and modern GPUs.
+
+## Future Work
+- Add support for larger datasets and distributed training.
+- Implement evaluation and inference scripts.
+- Extend the model to support fine-tuning on downstream tasks.
+
+## References
+- [Attention Is All You Need](https://arxiv.org/abs/1706.03762)
+- [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
+- [PyTorch Documentation](https://pytorch.org/docs/stable/index.html)
+- [Flash Attention: Fast and Memory-Efficient Exact Attention with IO-Awareness](https://arxiv.org/abs/2205.14135)
+
+
+

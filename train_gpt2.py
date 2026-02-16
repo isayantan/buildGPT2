@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass
+import inspect
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -31,10 +32,14 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)     # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)     # (B, nh, T, hs)
         # attention
-        att = (q @ k.transpose(-2, -1)) * (1.0/math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf'))
-        att = F.softmax(att, dim = -1)
-        y = att @ v
+        # att = (q @ k.transpose(-2, -1)) * (1.0/math.sqrt(k.size(-1)))
+        # att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf'))
+        # att = F.softmax(att, dim = -1)
+        # y = att @ v
+
+        # instead implement flash attention with scaled_dot_product_attention, which is much faster and more memory efficient
+        y = F.scaled_dot_product_attention(q, k, v, is_causal = True)
+
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         # output projection
         y = self.c_proj(y)
@@ -180,6 +185,24 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model 
+    
+    def configure_optimizers(self, weight_decay, learning_rate, device):
+        # collect parameters that require gradients
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+        # separate out all parameters to those that will and won't experience regularizing weight decay
+        decay_params = [p for pn, p in param_dict.items() if p.dim() >= 2]
+        nodecay_params = [p for pn, p in param_dict.items() if p.dim() < 2]
+        # assign the parameters to the optimizer groups, using weight decay for the appropriate parameters
+        optim_groups = [
+            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': nodecay_params, 'weight_decay': 0.0}
+        ]
+        # create AdamW optimizer and use the fused version if available for faster training
+        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and 'cuda' in device
+        optimizer = torch.optim.AdamW(optim_groups, lr = learning_rate, betas = (0.9, 0.95), eps = 1e-8, fused = use_fused)
+        return optimizer
 
 # -----------------------------------------------------------------
 # data loading
@@ -215,7 +238,9 @@ class DataLoaderLite:
         return x, y
 
 # -----------------------------------------------------------------
-# set device to cuda:2
+import time
+
+# set device to cuda
 device = "cuda:2"
 
 # set seed for reproducibility
@@ -223,22 +248,62 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(1337)
 
-train_loader = DataLoaderLite(B = 4, T = 32)
+train_loader = DataLoaderLite(B = 16, T = 1024)
+
+# set float32 matmul precision to high for faster training on Ampere and newer GPUs (like the 4090) - this is a no-cost speedup
+torch.set_float32_matmul_precision('high')
 
 # get logits
 model = GPT(GPTConfig())
 model.to(device)
+model = torch.compile(model)
+
+# learning rate schedule with warmup and cosine decay
+max_lr = 6e-4
+min_lr = max_lr * 0.1
+warmpup_steps = 10
+max_steps = 50
+
+def get_lr(it):
+    # linear warmup
+    if it < warmpup_steps:
+        return max_lr * (it + 1)/ warmpup_steps
+    if it > max_steps:
+        return min_lr
+    # cosine decay
+    decay_ratio = (it - warmpup_steps)/ (max_steps - warmpup_steps)
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1 + math.cos(math.pi * decay_ratio))
+    return min_lr + coeff * (max_lr - min_lr)
 
 # optimizer!
-optimizer = torch.optim.AdamW(model.parameters(), lr = 3e-4)
-for i in range(50):
+# optimizer = torch.optim.AdamW(model.parameters(), lr = 3e-4, betas = (0.9, 0.95), eps = 1e-8)
+optimizer = model.configure_optimizers(weight_decay = 0.1, learning_rate = 6e-4, device = device)
+
+for step in range(max_steps):
+    t0 = time.time()
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
-    logits, loss = model(x, y)
+    # use mixed precision with autocast. Ampere and newer GPUs have hardware support for bfloat16, which is
+    #  a 16-bit floating point format that has the same range as float32 but with less precision.
+    #  This allows us to use mixed precision training without worrying about underflow or overflow issues that can arise with float16.
+    #  By using autocast, we can automatically use bfloat16 where it's beneficial and keep other operations in float32 for better accuracy.
+    with torch.autocast(device_type = device, dtype = torch.bfloat16):
+        logits, loss = model(x, y)
     loss.backward()
+    # clip the gradient to 1.0 to prevent exploding gradients, which can destabilize training
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    # update learning rate
+    lr = get_lr(step)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
     optimizer.step()
-    print(f"step {i}, loss: {loss.item()}")
+    torch.cuda.synchronize()
+    t1 = time.time()
+    dt = (t1 - t0) * 1000          # convert to milliseconds
+    tokens_per_sec = (train_loader.B * train_loader.T)/(t1 - t0)         # throghput in tokens per second
+    print(f"step {step} | loss: {loss.item()} | norm: {norm.item():.4f} | time: {dt:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
 
 import sys; sys.exit(0)
 

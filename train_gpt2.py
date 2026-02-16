@@ -241,12 +241,20 @@ class DataLoaderLite:
 import time
 
 # set device to cuda
-device = "cuda:2"
+device = "cuda:4"
 
 # set seed for reproducibility
 torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(1337)
+
+total_batch_size = 524288   # 2^19 ~ 0.5M tokens per batch, which is the batch size used in the GPT-2 paper for training the 124M parameter model 
+B = 16           # micro batch size per GPU
+T = 1024         # sequence length
+assert total_batch_size % (B * T) == 0, "total_batch_size must be divisible by B * T"
+grad_accum_steps = total_batch_size // (B * T)
+print(f"total_batch_size = {total_batch_size}")
+print(f"Using grad_accum_steps = {grad_accum_steps}")
 
 train_loader = DataLoaderLite(B = 16, T = 1024)
 
@@ -256,7 +264,7 @@ torch.set_float32_matmul_precision('high')
 # get logits
 model = GPT(GPTConfig())
 model.to(device)
-model = torch.compile(model)
+# model = torch.compile(model)
 
 # learning rate schedule with warmup and cosine decay
 max_lr = 6e-4
@@ -282,16 +290,20 @@ optimizer = model.configure_optimizers(weight_decay = 0.1, learning_rate = 6e-4,
 
 for step in range(max_steps):
     t0 = time.time()
-    x, y = train_loader.next_batch()
-    x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
-    # use mixed precision with autocast. Ampere and newer GPUs have hardware support for bfloat16, which is
-    #  a 16-bit floating point format that has the same range as float32 but with less precision.
-    #  This allows us to use mixed precision training without worrying about underflow or overflow issues that can arise with float16.
-    #  By using autocast, we can automatically use bfloat16 where it's beneficial and keep other operations in float32 for better accuracy.
-    with torch.autocast(device_type = device, dtype = torch.bfloat16):
-        logits, loss = model(x, y)
-    loss.backward()
+    loss_accum = 0.0
+    for micro_step in range(grad_accum_steps):
+        x, y = train_loader.next_batch()
+        x, y = x.to(device), y.to(device)
+        # use mixed precision with autocast. Ampere and newer GPUs have hardware support for bfloat16, which is
+        #  a 16-bit floating point format that has the same range as float32 but with less precision.
+        #  This allows us to use mixed precision training without worrying about underflow or overflow issues that can arise with float16.
+        #  By using autocast, we can automatically use bfloat16 where it's beneficial and keep other operations in float32 for better accuracy.
+        with torch.autocast(device_type = device, dtype = torch.bfloat16):
+            logits, loss = model(x, y)
+        loss = loss / grad_accum_steps     # scale the loss by grad_accum_steps to average the gradients across the micro-batches
+        loss_accum += loss.detach()
+        loss.backward()
     # clip the gradient to 1.0 to prevent exploding gradients, which can destabilize training
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     # update learning rate
@@ -302,8 +314,9 @@ for step in range(max_steps):
     torch.cuda.synchronize()
     t1 = time.time()
     dt = (t1 - t0) * 1000          # convert to milliseconds
-    tokens_per_sec = (train_loader.B * train_loader.T)/(t1 - t0)         # throghput in tokens per second
-    print(f"step {step} | loss: {loss.item()} | norm: {norm.item():.4f} | time: {dt:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
+    tokens_processed = train_loader.B * train_loader.T * grad_accum_steps
+    tokens_per_sec = (tokens_processed)/(t1 - t0)         # throghput in tokens per second
+    print(f"step {step} | loss: {loss_accum.item():.6f} | lr: {lr:.6f} | norm: {norm.item():.4f} | time: {dt:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
 
 import sys; sys.exit(0)
 

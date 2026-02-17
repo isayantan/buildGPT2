@@ -32,6 +32,7 @@ dist/
 
 ### Data
 data/
+edu_fiineweb10B/
 
 ### Logs and databases
 *.log

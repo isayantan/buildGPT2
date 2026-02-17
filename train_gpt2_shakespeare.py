@@ -209,36 +209,24 @@ class GPT(nn.Module):
 # -----------------------------------------------------------------
 # data loading
 import tiktoken
-import numpy as np
-
-def load_tokens(filename):
-    npt = np.load(filename)
-    ppt = torch.tensor(npt, dtype = torch.long)
-    return ppt
+file = "data/tiny_shakespeare.txt"
 
 class DataLoaderLite:
-    def __init__(self, B, T, process_rank, num_processes, split):
+    def __init__(self, B, T, process_rank, num_processes):
         self.B = B 
         self.T = T
         self.process_rank = process_rank
         self.num_processes = num_processes
-        assert split in {"train", "val"}
 
-        # get shard filename
-        data_root = os.path.join(os.path.dirname(__file__), "edu_fiineweb10B")
-        shards = os.listdir(data_root)                    # get all the shard files in the data root
-        shards = [s for s in shards if split in s]        # check if train or val is in the filename
-        shards = sorted(shards)                           # sort to ensure the order is deterministic
-        shards = [os.path.join(data_root, s) for s in shards]   # get the full path of the shard files
-        self.shards = shards
-        assert len(shards) > 0, f"no data shards found for split {split} in {data_root}"
-        if master_process:
-            print(f"found {len(shards)} shards for split {split}")
-        
-        # state, init at shard zero
-        self.current_shard = 0                            # index of the current shard file we are reading from
-        self.tokens = load_tokens(self.shards[self.current_shard])    # load the current shard into memory as a torch tensor of shape (num_tokens_in_shard, )
-        self.current_position = self.B * self.T * self.process_rank   # the current position in the shard, initialized to the offset for this process based on its rank and the total batch size
+        # at init load tokens from the file
+        with open(file, 'r') as f:
+            text = f.read()
+        # encode with tiktoken gpt2 encoder
+        enc = tiktoken.get_encoding('gpt2')
+        tokens = enc.encode(text)
+        self.tokens = torch.tensor(tokens)
+        # current pos
+        self.current_position = self.B * self.T * self.process_rank
 
     def next_batch(self):
         B, T = self.B, self.T
@@ -249,8 +237,6 @@ class DataLoaderLite:
         self.current_position += B * T * self.num_processes
         # if loading the next batch would be out of bound then reset current_position
         if self.current_position + (B * T * self.num_processes + 1) > len(self.tokens):
-            self.current_shard = (self.current_shard + 1) % len(self.shards)
-            self.tokens = load_tokens(self.shards[self.current_shard])
             self.current_position = self.B * self.T * self.process_rank
         return x, y
 
@@ -261,7 +247,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
 # simple launch: python train_gpt2.py
-# distributed launch: CUDA_VISIBLE_DEVICES=3,4 torchrun --standalone --nproc_per_node=2 train_gpt2.py
+# distributed launch: torchrun --standalone --nproc_per_node=4 train_gpt2.py
+
 
 # set up the DDP
 # torchrun command sets the env variables RANK, LOCAL_RANK, WORLD_SIZE
@@ -295,8 +282,8 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(1337)
 
 total_batch_size = 524288   # 2^19 ~ 0.5M tokens per batch, which is the batch size used in the GPT-2 paper for training the 124M parameter model 
-B = 64           # micro batch size per GPU
-T = 512         # sequence length
+B = 16           # micro batch size per GPU
+T = 1024         # sequence length
 assert total_batch_size % (B * T * ddp_world_size) == 0, "total_batch_size must be divisible by B * T * ddp_world_size"
 grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
 if master_process:
@@ -305,7 +292,7 @@ if master_process:
 
 print(f"I am GPU with ddp_rank = {ddp_rank} and ddp_local_rank = {ddp_local_rank} of {ddp_world_size}, master process: {master_process}")
 
-train_loader = DataLoaderLite(B = 16, T = 1024, process_rank=ddp_rank, num_processes = ddp_world_size, split="train")
+train_loader = DataLoaderLite(B = 16, T = 1024, process_rank=ddp_rank, num_processes = ddp_world_size)
 
 # set float32 matmul precision to high for faster training on Ampere and newer GPUs (like the 4090) - this is a no-cost speedup
 torch.set_float32_matmul_precision('high')
@@ -322,8 +309,8 @@ raw_model = model.module if ddp else model     # always reference the raw model 
 # learning rate schedule with warmup and cosine decay
 max_lr = 6e-4
 min_lr = max_lr * 0.1
-warmpup_steps = 715
-max_steps = 4
+warmpup_steps = 10
+max_steps = 50
 
 def get_lr(it):
     # linear warmup

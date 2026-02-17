@@ -363,10 +363,10 @@ for step in range(max_steps):
     if master_process:
         print(f"step {step} | loss: {loss_accum.item():.6f} | lr: {lr:.6f} | norm: {norm.item():.4f} | time: {dt:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
 
+# cleanup
 if ddp:
     destroy_process_group()
 
-import sys; sys.exit(0)
 
 # num_return_sequences = 5
 # max_length = 30

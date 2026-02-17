@@ -9,7 +9,8 @@ This repository contains a PyTorch implementation for training a GPT-2-like lang
 - **Fused AdamW Optimizer**: Dynamically enables fused kernels for the AdamW optimizer if supported by the hardware.
 - **Learning Rate Scheduler**: Implements a warmup and cosine decay learning rate schedule.
 - **Gradient Clipping**: Prevents exploding gradients by clipping the gradient norm.
-- **Gradient Accumulation**: 
+- **Gradient Accumulation**: Simulates larger effective batch sizes by accumulating gradients over multiple smaller micro-batches before updating weights. This allows training with larger batch sizes on GPUs with limited memory.
+- **Data Distributed Parallel (DDP)**: Enables multi-GPU training across a single machine or multiple machines. Automatically synchronizes gradients across GPUs and supports configurable batch splitting, allowing efficient scaling of training with minimal code changes.
 
 ## Requirements
 - Python 3.8+
@@ -28,9 +29,20 @@ pip install torch torchvision tiktoken
 
 ## Usage
 ### Training the Model
-To train the model, run the following command:
+To train the model on a single GPU, run the following command:
 ```bash
 python train_gpt2.py
+```
+
+### Distributed Training (Multi-GPU)
+To train using multiple GPUs with DDP, use `torchrun`. For example, to train on 2 specific GPUs (3 and 4):
+```bash
+CUDA_VISIBLE_DEVICES=3,4 torchrun --standalone --nproc_per_node=2 train_gpt2.py
+```
+
+For all available GPUs on a single machine:
+```bash
+torchrun --standalone --nproc_per_node=<num_gpus> train_gpt2.py
 ```
 
 ### Key Configurations
@@ -41,15 +53,17 @@ python train_gpt2.py
 
 ### Example Output
 During training, the script will log the following metrics:
+- **Step**: Training step number.
 - **Loss**: Cross-entropy loss for the language modeling task.
+- **Learning Rate (lr)**: Current learning rate (changes with warmup and cosine decay schedule).
 - **Gradient Norm**: The norm of the gradients after clipping.
-- **Tokens per Second**: Throughput in tokens processed per second.
-- **Time per Step**: Time taken for each training step.
+- **Time**: Time taken for each training step in milliseconds.
+- **Tokens per Second (tok/sec)**: Throughput in tokens processed per second.
 
 Example log:
 ```
-step 0 | loss: 10.9355 | norm: 0.9876 | time: 1917.00ms | tok/sec: 8546.68
-step 1 | loss: 9.8765 | norm: 0.8765 | time: 1800.00ms | tok/sec: 9000.00
+step 0 | loss: 10.935456 | lr: 0.000060 | norm: 0.9876 | time: 1917.00ms | tok/sec: 8546.68
+step 1 | loss: 9.876543 | lr: 0.000120 | norm: 0.8765 | time: 1800.00ms | tok/sec: 9000.00
 ```
 
 ## Model Details
@@ -77,7 +91,6 @@ The training script uses the `tiny_shakespeare.txt` dataset as an example. Repla
 - **Flash Attention**: Implements efficient attention computation using PyTorch's `scaled_dot_product_attention` function. This method reduces memory usage and speeds up training by avoiding the need to explicitly compute and store large attention matrices. It is particularly useful for long sequences and modern GPUs.
 
 ## Future Work
-- Add support for larger datasets and distributed training.
 - Implement evaluation and inference scripts.
 - Extend the model to support fine-tuning on downstream tasks.
 

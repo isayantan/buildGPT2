@@ -212,9 +212,11 @@ import tiktoken
 file = "data/tiny_shakespeare.txt"
 
 class DataLoaderLite:
-    def __init__(self, B, T):
+    def __init__(self, B, T, process_rank, num_processes):
         self.B = B 
         self.T = T
+        self.process_rank = process_rank
+        self.num_processes = num_processes
 
         # at init load tokens from the file
         with open(file, 'r') as f:
@@ -223,23 +225,26 @@ class DataLoaderLite:
         enc = tiktoken.get_encoding('gpt2')
         tokens = enc.encode(text)
         self.tokens = torch.tensor(tokens)
-        print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
         # current pos
-        self.current_position = 0
+        self.current_position = self.B * self.T * self.process_rank
 
     def next_batch(self):
         B, T = self.B, self.T
-        buf = self.tokens[self.current_position: self.current_position + B*T + 1]
+        buf = self.tokens[self.current_position: self.current_position + B * T + 1]
         x = buf[:-1].view(B, T)
         y = buf[1:].view(B, T)
         # advance the pos in the tensor
-        self.current_position += B * T
+        self.current_position += B * T * self.num_processes
         # if loading the next batch would be out of bound then reset current_position
-        if self.current_position + (B * T + 1) > len(self.tokens):
-            self.current_position = 0
+        if self.current_position + (B * T * self.num_processes + 1) > len(self.tokens):
+            self.current_position = self.B * self.T * self.process_rank
         return x, y
 
 # -----------------------------------------------------------------
+
+from torch.distributed import init_process_group, destroy_process_group
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.distributed as dist
 
 # simple launch: python train_gpt2.py
 # distributed launch: torchrun --standalone --nproc_per_node=4 train_gpt2.py
@@ -250,6 +255,7 @@ class DataLoaderLite:
 ddp = int(os.environ.get('RANK', -1)) != -1        # is this a ddp run? if RANK is not set, then this will be -1, which means it's not a ddp run
 if ddp:
     assert torch.cuda.is_available(), "DDP requires CUDA"
+    init_process_group(backend = 'nccl')
     ddp_rank = int(os.environ['RANK'])
     ddp_local_rank = int(os.environ['LOCAL_RANK'])
     ddp_world_size = int(os.environ['WORLD_SIZE'])
@@ -284,10 +290,9 @@ if master_process:
     print(f"total_batch_size = {total_batch_size}")
     print(f"Using grad_accum_steps = {grad_accum_steps}")
 
-print(f"I am GPU {ddp_local_rank} of {ddp_world_size}, master process: {master_process}")
-import sys; sys.exit(0)
+print(f"I am GPU with ddp_rank = {ddp_rank} and ddp_local_rank = {ddp_local_rank} of {ddp_world_size}, master process: {master_process}")
 
-train_loader = DataLoaderLite(B = 16, T = 1024)
+train_loader = DataLoaderLite(B = 16, T = 1024, process_rank=ddp_rank, num_processes = ddp_world_size)
 
 # set float32 matmul precision to high for faster training on Ampere and newer GPUs (like the 4090) - this is a no-cost speedup
 torch.set_float32_matmul_precision('high')
@@ -295,7 +300,11 @@ torch.set_float32_matmul_precision('high')
 # get logits
 model = GPT(GPTConfig())
 model.to(device)
-# model = torch.compile(model)
+model = torch.compile(model)
+if ddp:
+    # wrap the model in DDP. 
+    model = DDP(model, device_ids = [ddp_local_rank])
+raw_model = model.module if ddp else model     # always reference the raw model for logging and checkpointing, not the DDP wrapper
 
 # learning rate schedule with warmup and cosine decay
 max_lr = 6e-4
@@ -317,7 +326,7 @@ def get_lr(it):
 
 # optimizer!
 # optimizer = torch.optim.AdamW(model.parameters(), lr = 3e-4, betas = (0.9, 0.95), eps = 1e-8)
-optimizer = model.configure_optimizers(weight_decay = 0.1, learning_rate = 6e-4, device = device)
+optimizer = raw_model.configure_optimizers(weight_decay = 0.1, learning_rate = 6e-4, device = device)
 
 for step in range(max_steps):
     t0 = time.time()
@@ -334,7 +343,11 @@ for step in range(max_steps):
             logits, loss = model(x, y)
         loss = loss / grad_accum_steps     # scale the loss by grad_accum_steps to average the gradients across the micro-batches
         loss_accum += loss.detach()
+        if ddp:
+            model.require_grad_sync = (micro_step == grad_accum_steps - 1)    # only sync gradients on the last micro step of the accumulation to save time and memory
         loss.backward()
+    if ddp:
+        dist.all_reduce(loss_accum, op = dist.ReduceOp.AVG)    # average the loss across all processes for logging
     # clip the gradient to 1.0 to prevent exploding gradients, which can destabilize training
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     # update learning rate
@@ -345,9 +358,13 @@ for step in range(max_steps):
     torch.cuda.synchronize()
     t1 = time.time()
     dt = (t1 - t0) * 1000          # convert to milliseconds
-    tokens_processed = train_loader.B * train_loader.T * grad_accum_steps
+    tokens_processed = train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size
     tokens_per_sec = (tokens_processed)/(t1 - t0)         # throghput in tokens per second
-    print(f"step {step} | loss: {loss_accum.item():.6f} | lr: {lr:.6f} | norm: {norm.item():.4f} | time: {dt:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
+    if master_process:
+        print(f"step {step} | loss: {loss_accum.item():.6f} | lr: {lr:.6f} | norm: {norm.item():.4f} | time: {dt:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
+
+if ddp:
+    destroy_process_group()
 
 import sys; sys.exit(0)
 

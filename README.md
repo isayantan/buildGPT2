@@ -9,6 +9,7 @@ This repository contains a PyTorch implementation for training a GPT-2-like lang
 - **Fused AdamW Optimizer**: Dynamically enables fused kernels for the AdamW optimizer if supported by the hardware.
 - **Learning Rate Scheduler**: Implements a warmup and cosine decay learning rate schedule.
 - **Gradient Clipping**: Prevents exploding gradients by clipping the gradient norm.
+- **Gradient Accumulation**: 
 
 ## Requirements
 - Python 3.8+

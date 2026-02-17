@@ -1,4 +1,6 @@
+import time
 import math
+import os
 from dataclasses import dataclass
 import inspect
 import torch
@@ -238,10 +240,35 @@ class DataLoaderLite:
         return x, y
 
 # -----------------------------------------------------------------
-import time
 
-# set device to cuda
-device = "cuda:4"
+# simple launch: python train_gpt2.py
+# distributed launch: torchrun --standalone --nproc_per_node=4 train_gpt2.py
+
+
+# set up the DDP
+# torchrun command sets the env variables RANK, LOCAL_RANK, WORLD_SIZE
+ddp = int(os.environ.get('RANK', -1)) != -1        # is this a ddp run? if RANK is not set, then this will be -1, which means it's not a ddp run
+if ddp:
+    assert torch.cuda.is_available(), "DDP requires CUDA"
+    ddp_rank = int(os.environ['RANK'])
+    ddp_local_rank = int(os.environ['LOCAL_RANK'])
+    ddp_world_size = int(os.environ['WORLD_SIZE'])
+    device = f"cuda:{ddp_local_rank}"
+    torch.cuda.set_device(device)
+    master_process = ddp_rank == 0       # only the master process will do logging, checkpointing, etc.
+else:
+    # vanilla non-ddp process
+    ddp_rank = 0
+    ddp_local_rank = 0
+    ddp_world_size = 1
+    master_process = True
+    # attempt to auto detect the device
+    device = "cpu"
+    if torch.cuda.is_available():
+        device = "cuda:4"
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        device = "mps"
+    print(f"auto-detected device: {device}")
 
 # set seed for reproducibility
 torch.manual_seed(1337)
@@ -251,10 +278,14 @@ if torch.cuda.is_available():
 total_batch_size = 524288   # 2^19 ~ 0.5M tokens per batch, which is the batch size used in the GPT-2 paper for training the 124M parameter model 
 B = 16           # micro batch size per GPU
 T = 1024         # sequence length
-assert total_batch_size % (B * T) == 0, "total_batch_size must be divisible by B * T"
-grad_accum_steps = total_batch_size // (B * T)
-print(f"total_batch_size = {total_batch_size}")
-print(f"Using grad_accum_steps = {grad_accum_steps}")
+assert total_batch_size % (B * T * ddp_world_size) == 0, "total_batch_size must be divisible by B * T * ddp_world_size"
+grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
+if master_process:
+    print(f"total_batch_size = {total_batch_size}")
+    print(f"Using grad_accum_steps = {grad_accum_steps}")
+
+print(f"I am GPU {ddp_local_rank} of {ddp_world_size}, master process: {master_process}")
+import sys; sys.exit(0)
 
 train_loader = DataLoaderLite(B = 16, T = 1024)
 

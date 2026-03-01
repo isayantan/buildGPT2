@@ -32,7 +32,7 @@ dist/
 
 ### Data
 data/
-edu_fiineweb10B/
+edu_fineweb10B/
 
 ### Logs and databases
 *.log
@@ -54,4 +54,3 @@ Thumbs.db
 
 ### Python bytecode in nested dirs
 **/__pycache__/
-

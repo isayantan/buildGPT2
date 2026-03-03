@@ -6,6 +6,7 @@ This repository trains a GPT-2 style language model from scratch in PyTorch, eva
 
 - [Highlights](#highlights)
 - [Training Maturity Note](#training-maturity-note)
+- [Training Efficiency Features Used](#training-efficiency-features-used)
 - [What This Repository Does](#what-this-repository-does)
 - [Environment Setup](#environment-setup)
 - [Data Preparation](#data-preparation)
@@ -81,6 +82,24 @@ In a shocking finding, researchers discovered that the brain was not only able t
 This model is still relatively young in training. The highlighted prompt samples are from checkpoint `step 10000`, which corresponds to about `5.24B` tokens seen (`524,288` tokens/step). The current logged HellaSwag point is at `step 14500` (about `7.60B` tokens) with accuracy around `0.0192`, so evaluation quality is still weak at this stage.
 
 With longer training (more optimization steps and tokens seen, up to and beyond the configured `19073` steps, about `10.00B` tokens), HellaSwag results are expected to improve, and prompt-conditioned generations should become more coherent.
+
+### Training Efficiency Features Used
+
+> Key engineering features implemented to improve training throughput, stability, and final quality with longer runs.
+
+- `Flash Attention path`: causal attention uses `scaled_dot_product_attention(...)` for faster and more memory-efficient attention.
+- `Mixed precision (bf16)`: `torch.autocast(..., dtype=torch.bfloat16)` in training and evaluation loops.
+- `Multi-GPU CUDA training`: `torchrun` + `DistributedDataParallel (DDP)` with NCCL backend.
+- `Gradient accumulation`: large effective global batch size via `grad_accum_steps`.
+- `Learning-rate schedule`: linear warmup + cosine decay.
+- `Gradient clipping`: `clip_grad_norm_(..., 1.0)` for optimization stability.
+- `Fused AdamW` (when available on CUDA): faster optimizer update path.
+- `Matmul precision tuning`: `torch.set_float32_matmul_precision('high')`.
+- `Optional compile path`: `torch.compile` toggle through config/runtime.
+- `Distributed metric reduction`: synchronized loss/accuracy statistics across ranks.
+- `Sharded token loading`: `.npy` shard streaming for efficient train/val data feeding.
+
+These features do not automatically make early-step HellaSwag strong, but they make longer training more efficient and stable, which is what improves benchmark and generation quality over time.
 
 ## What This Repository Does
 

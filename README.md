@@ -5,6 +5,7 @@ This repository trains a GPT-2 style language model from scratch in PyTorch, eva
 ## Contents
 
 - [Highlights](#highlights)
+- [Training Maturity Note](#training-maturity-note)
 - [What This Repository Does](#what-this-repository-does)
 - [Environment Setup](#environment-setup)
 - [Data Preparation](#data-preparation)
@@ -74,6 +75,12 @@ In a shocking finding, researchers discovered that the brain was not only able t
 - Script: `scripts/generate_from_checkpoint.py`
 - Sampling config: `max_length=64`, `top_k=50`, `sample_seed=42`, `num_return_sequences=1`
 - Prompt-specific runs use the same command with different `--prompt` values
+
+### Training Maturity Note
+
+This model is still relatively young in training. The highlighted prompt samples are from checkpoint `step 10000`, which corresponds to about `5.24B` tokens seen (`524,288` tokens/step). The current logged HellaSwag point is at `step 14500` (about `7.60B` tokens) with accuracy around `0.0192`, so evaluation quality is still weak at this stage.
+
+With longer training (more optimization steps and tokens seen, up to and beyond the configured `19073` steps, about `10.00B` tokens), HellaSwag results are expected to improve, and prompt-conditioned generations should become more coherent.
 
 ## What This Repository Does
 

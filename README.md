@@ -35,7 +35,7 @@ Hello, I'm a language model,
 **Generated Sample**
 
 ```text
-and I like to use them for learning but still use them as long as my students don't do anything crazy. And as a teacher, I've heard quite a few of the words (and sometimes you're lucky to have the opportunity!), but what I'm really afraid of is
+Hello, I'm a language model, and I like to use them for learning but still use them as long as my students don't do anything crazy. And as a teacher, I've heard quite a few of the words (and sometimes you're lucky to have the opportunity!), but what I'm really afraid of is
 ```
 
 #### Sample 2
@@ -49,7 +49,7 @@ The future of AI is
 **Generated Sample**
 
 ```text
-in the making. The Internet has many good aspects of its own for humanity that are being neglected and neglected by the governments, corporations, and nonprofits that we humans are working to eliminate. These are a few things AI can do that promise us to never forget.
+The future of AI is in the making. The Internet has many good aspects of its own for humanity that are being neglected and neglected by the governments, corporations, and nonprofits that we humans are working to eliminate. These are a few things AI can do that promise us to never forget.
 A few years ago, the
 ```
 
@@ -64,7 +64,7 @@ In a shocking finding, researchers discovered that
 **Generated Sample**
 
 ```text
-the brain was not only able to regulate appetite with a healthy appetite hormone, the hormone leptin. Instead it produced a molecule that was able to kill off brain tumor cells.
+In a shocking finding, researchers discovered that the brain was not only able to regulate appetite with a healthy appetite hormone, the hormone leptin. Instead it produced a molecule that was able to kill off brain tumor cells.
 "Now we see these cells dying and dying and growing. We think this is a proof of the
 ```
 

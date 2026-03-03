@@ -20,6 +20,7 @@ This repository trains a GPT-2 style language model from scratch in PyTorch, eva
 - `scripts/dataloader.py`: Shard-based train/val dataloader over local `.npy` token shards.
 - `scripts/evaluation.py`: Validation loss, HellaSwag scoring, and text generation helpers.
 - `scripts/ddp.py`: DDP bootstrap/cleanup and device selection logic.
+- `scripts/generate_from_checkpoint.py`: Inference entrypoint to sample text from a saved `.pt` checkpoint.
 - `scripts/utils.py`: Config loading, run-name construction, log/checkpoint file helpers.
 - `config/gpt2_fineweb_default.py`: Default hyperparameter config used by `scripts/main.py`.
 - `train_gpt2.py`: Original monolithic training script retained as a baseline/reference.
@@ -149,8 +150,68 @@ What this notebook does:
 
 ![Training/Validation/HellaSwag plots from `plot_results.ipynb`](assets/plots/plot_results_metrics.png)
 
+## Generate From Trained Model
+
+Run this file with multiple prompts from a saved checkpoint:
+
+```bash
+CKPT=log/gpt2_fineweb_default__l12_h12_e768__tbs524288_mb32_seq1024_steps19073__model_10000.pt
+
+python scripts/generate_from_checkpoint.py --checkpoint "$CKPT" \
+  --prompt "Hello, I'm a language model," \
+  --max-length 64 \
+  --top-k 50 \
+  --num-return-sequences 1 \
+  --sample-seed 42
+
+python scripts/generate_from_checkpoint.py --checkpoint "$CKPT" \
+  --prompt "The future of AI is" \
+  --max-length 64 \
+  --top-k 50 \
+  --num-return-sequences 1 \
+  --sample-seed 42
+
+python scripts/generate_from_checkpoint.py --checkpoint "$CKPT" \
+  --prompt "In a shocking finding, researchers discovered that" \
+  --max-length 64 \
+  --top-k 50 \
+  --num-return-sequences 1 \
+  --sample-seed 42
+```
+
+Prompts used in these examples:
+
+- `Hello, I'm a language model,`
+- `The future of AI is`
+- `In a shocking finding, researchers discovered that`
+
+Example outputs from checkpoint `...__model_10000.pt`:
+
+```text
+checkpoint: log/gpt2_fineweb_default__l12_h12_e768__tbs524288_mb32_seq1024_steps19073__model_10000.pt
+device: cuda
+prompt: "Hello, I'm a language model,"
+max_length: 64, top_k: 50, sample_seed: 42
+rank 0 sample 0: Hello, I'm a language model, and I like to use them for learning but still use them as long as my students don't do anything crazy. And as a teacher, I've heard quite a few of the words (and sometimes you're lucky to have the opportunity!), but what I'm really afraid of is
+
+checkpoint: log/gpt2_fineweb_default__l12_h12_e768__tbs524288_mb32_seq1024_steps19073__model_10000.pt
+device: cuda
+prompt: 'The future of AI is'
+max_length: 64, top_k: 50, sample_seed: 42
+rank 0 sample 0: The future of AI is in the making. The Internet has many good aspects of its own for humanity that are being neglected and neglected by the governments, corporations, and nonprofits that we humans are working to eliminate. These are a few things AI can do that promise us to never forget.
+A few years ago, the
+
+checkpoint: log/gpt2_fineweb_default__l12_h12_e768__tbs524288_mb32_seq1024_steps19073__model_10000.pt
+device: cuda
+prompt: 'In a shocking finding, researchers discovered that'
+max_length: 64, top_k: 50, sample_seed: 42
+rank 0 sample 0: In a shocking finding, researchers discovered that the brain was not only able to regulate appetite with a healthy appetite hormone, the hormone leptin. Instead it produced a molecule that was able to kill off brain tumor cells.
+"Now we see these cells dying and dying and growing. We think this is a proof of the
+```
+
 ## Standalone Utility Scripts
 
 - `hellaswag.py`: evaluate HuggingFace GPT-2 checkpoints directly on HellaSwag.
 - `fineweb.py`: build local token shards from FineWeb-EDU.
 - `train_gpt2.py`: one-file training implementation containing model, data, DDP setup, eval, generation, and training loop.
+- `scripts/generate_from_checkpoint.py`: load a trained checkpoint and sample text from a prompt.

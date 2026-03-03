@@ -15,6 +15,7 @@ This repository trains a GPT-2 style language model from scratch in PyTorch, eva
 - [Logs and Checkpoints](#logs-and-checkpoints)
 - [Plotting Results](#plotting-results)
 - [Generate From Trained Model](#generate-from-trained-model)
+- [Next Steps](#next-steps)
 - [Repository Layout](#repository-layout)
 - [Standalone Utility Scripts](#standalone-utility-scripts)
 
@@ -263,6 +264,15 @@ Brief generation details:
 - Sampling: `top-k=50`, `sample_seed=42`, one return sequence per prompt
 - Max token length per sample: `64`
 - Prompt-only and sample-only formatted outputs are highlighted at the top under **Highlights**
+
+## Next Steps
+
+- Implement and benchmark **gated attention** variants (for example, gated attention blocks or grouped-query variants) vs current baseline.
+- Add **LUCID preconditioner** experiments and compare convergence speed, stability, and final eval metrics against AdamW.
+- Resume training for significantly longer runs (beyond current step count) to improve HellaSwag and generation coherence.
+- Add systematic ablations (attention variant, optimizer/preconditioner, batch size, LR schedule) with tracked results.
+- Expand evaluation beyond HellaSwag (additional zero-shot/few-shot tasks and perplexity tracking).
+- Add lightweight experiment tracking/reporting so each run logs config + metrics in one place for easy comparison.
 
 ## Repository Layout
 

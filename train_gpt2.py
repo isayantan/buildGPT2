@@ -226,7 +226,7 @@ class DataLoaderLite:
         assert split in {"train", "val"}
 
         # get shard filename
-        data_root = os.path.join(os.path.dirname(__file__), "edu_fiineweb10B")
+        data_root = os.path.join(os.path.dirname(__file__), "edu_fineweb10B")
         shards = os.listdir(data_root)                    # get all the shard files in the data root
         shards = [s for s in shards if split in s]        # check if train or val is in the filename
         shards = sorted(shards)                           # sort to ensure the order is deterministic
@@ -291,7 +291,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
 # simple launch: python train_gpt2.py
-# distributed launch: CUDA_VISIBLE_DEVICES=3,4 torchrun --standalone --nproc_per_node=2 train_gpt2.py
+# distributed launch: NCCL_P2P_LEVEL=NVL CUDA_VISIBLE_DEVICES=0,4,5,6 torchrun --standalone --nproc_per_node=4 train_gpt2.py
 
 # set up the DDP
 # torchrun command sets the env variables RANK, LOCAL_RANK, WORLD_SIZE
@@ -325,7 +325,8 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(1337)
 
 total_batch_size = 524288   # 2^19 ~ 0.5M tokens per batch, which is the batch size used in the GPT-2 paper for training the 124M parameter model 
-B = 64           # micro batch size per GPU
+B = 32         # micro batch size per GPU
+# B = 64           # micro batch size per GPU
 T = 1024         # sequence length
 assert total_batch_size % (B * T * ddp_world_size) == 0, "total_batch_size must be divisible by B * T * ddp_world_size"
 grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
@@ -356,7 +357,7 @@ raw_model = model.module if ddp else model     # always reference the raw model 
 max_lr = 6e-4
 min_lr = max_lr * 0.1
 warmpup_steps = 715
-max_steps = 4
+max_steps = 10
 # max_steps = 19073
 
 def get_lr(it):
@@ -407,6 +408,17 @@ for step in range(max_steps):
             print(f"Validation loss: {val_loss_accum.item():.4f}")
             with open(log_file, "a") as f:
                 f.write(f"{step} val {val_loss_accum.item():.4f}\n")
+            if step > 0 and (step % 5000 == 0 or last_step):
+                # optionally write model checkpoints
+                checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
+                checkpoint = {
+                    'model': raw_model.state_dict(),
+                    'config': raw_model.config,
+                    'step': step,
+                    'val_loss': val_loss_accum.item()
+                }
+                # also add optimizer.state_dict() and rng seeds etc
+                torch.save(checkpoint, checkpoint_path)
 
     # once in a while evaluate hellaswag
     if (step % 250 == 0 or last_step) and (not use_compile):
@@ -439,8 +451,6 @@ for step in range(max_steps):
             print(f"HellaSwag Accuracy: {num_correct_norm}/{num_total} = {acc_norm:.4f}")
             with open(log_file, "a") as f:
                 f.write(f"{step} hella {acc_norm:.4f}\n")
-
-
 
     # once in a while generate from the model (except step 0, which is noise)
     # doesn't work with torch.compile

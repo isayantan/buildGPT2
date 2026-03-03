@@ -33,8 +33,10 @@ dist/
 ### Data
 data/
 edu_fineweb10B/
+hellaswag/
 
 ### Logs and databases
+log/
 *.log
 *.sqlite3
 *.db

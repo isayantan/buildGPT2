@@ -1,104 +1,145 @@
-# GPT-2 Training with PyTorch
+# buildGPT2
 
-This repository contains a PyTorch implementation for training a GPT-2-like language model. The training script (`train_gpt2.py`) is designed to be efficient and leverages modern techniques such as mixed precision training, fused optimizers, and learning rate scheduling.
+This repository trains a GPT-2 style language model from scratch in PyTorch, evaluates on HellaSwag, generates qualitative samples, writes structured logs/checkpoints, and includes a plotting notebook for run analysis.
 
-## Features
-- **Custom GPT-2 Implementation**: The model is implemented from scratch, including components like self-attention, MLP, and layer normalization.
-- **Flash Attention**: Implements efficient attention computation using PyTorch's `scaled_dot_product_attention` function. This method reduces memory usage and speeds up training by avoiding the need to explicitly compute and store large attention matrices. It is particularly useful for long sequences and modern GPUs.
-- **Mixed Precision Training**: Utilizes `torch.autocast` with `bfloat16` for faster training on modern GPUs.
-- **Fused AdamW Optimizer**: Dynamically enables fused kernels for the AdamW optimizer if supported by the hardware.
-- **Learning Rate Scheduler**: Implements a warmup and cosine decay learning rate schedule.
-- **Gradient Clipping**: Prevents exploding gradients by clipping the gradient norm.
-- **Gradient Accumulation**: Simulates larger effective batch sizes by accumulating gradients over multiple smaller micro-batches before updating weights. This allows training with larger batch sizes on GPUs with limited memory.
-- **Data Distributed Parallel (DDP)**: Enables multi-GPU training across a single machine or multiple machines. Automatically synchronizes gradients across GPUs and supports configurable batch splitting, allowing efficient scaling of training with minimal code changes.
+## What This Repository Does
 
-## Requirements
-- Python 3.8+
-- PyTorch 2.0+
-- A CUDA-enabled GPU (Ampere or newer recommended for optimal performance)
+- Implements a GPT-2 architecture from scratch (attention, MLP, residual blocks, weight tying, custom init).
+- Trains on tokenized FineWeb-EDU shards with gradient accumulation.
+- Supports single-process and multi-GPU Distributed Data Parallel (DDP) runs.
+- Evaluates validation loss and HellaSwag accuracy during training.
+- Generates sample completions during training.
+- Saves logs and model checkpoints with descriptive run names derived from config values.
+- Plots training/validation/hellaswag metrics from log files in a notebook.
 
-Install the required dependencies:
+## Repository Layout
+
+- `scripts/main.py`: Main entrypoint for modular, config-driven training.
+- `scripts/training.py`: Training loop, LR schedule, eval cadence, checkpointing, throughput reporting.
+- `scripts/model.py`: GPT model, blocks, optimizer setup, optional HF pretrained weight loading helper.
+- `scripts/dataloader.py`: Shard-based train/val dataloader over local `.npy` token shards.
+- `scripts/evaluation.py`: Validation loss, HellaSwag scoring, and text generation helpers.
+- `scripts/ddp.py`: DDP bootstrap/cleanup and device selection logic.
+- `scripts/utils.py`: Config loading, run-name construction, log/checkpoint file helpers.
+- `config/gpt2_fineweb_default.py`: Default hyperparameter config used by `scripts/main.py`.
+- `train_gpt2.py`: Original monolithic training script retained as a baseline/reference.
+- `fineweb.py`: Utility script to download/tokenize FineWeb-EDU and write shard files.
+- `hellaswag.py`: Utility script to download/render/evaluate HellaSwag examples.
+- `plot_results.ipynb`: Notebook to load one run log and plot metrics side by side.
+- `edu_fineweb10B/`: Local training token shards consumed by the dataloader.
+- `hellaswag/`: Local cache for downloaded HellaSwag JSONL files.
+- `log/`: Run logs (`*.log`) and checkpoint files (`*.pt`).
+
+## Environment Setup
+
+Use Python 3.10+ (3.8+ should also work).
+
 ```bash
-pip install torch torchvision tiktoken
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install torch numpy tiktoken datasets tqdm requests transformers matplotlib jupyter
 ```
 
-## File Structure
-- `train_gpt2.py`: Main training script.
-- `data/tiny_shakespeare.txt`: Example dataset for training.
-- `README.md`: Project documentation.
+## Data Preparation
 
-## Usage
-### Training the Model
-To train the model on a single GPU, run the following command:
+### FineWeb-EDU Shards
+
+Generate token shards:
+
 ```bash
-python train_gpt2.py
+python fineweb.py
 ```
 
-### Distributed Training (Multi-GPU)
-To train using multiple GPUs with DDP, use `torchrun`. For example, to train on 2 specific GPUs (3 and 4):
+Expected training path is set by config at `data.data_root` (default: `edu_fineweb10B`).
+
+Important: `fineweb.py` currently defines `local_dir = "edu_fiineweb10B"` (double `i`), while training defaults to `edu_fineweb10B`. Keep these consistent by either renaming the generated folder or updating `config/gpt2_fineweb_default.py`.
+
+### HellaSwag Cache
+
+HellaSwag files are downloaded on demand by `hellaswag.py`/training evaluation into `hellaswag/`.
+
+## Configuration
+
+The main config is `config/gpt2_fineweb_default.py` and contains:
+
+- `model`: GPT shape (`vocab_size`, `block_size`, `n_layer`, `n_head`, `n_embd`)
+- `data`: shard location (`data_root`)
+- `training`: `total_batch_size`, `micro_batch_size`, `sequence_length`, `max_steps`
+- `optimizer`: weight decay and base LR
+- `lr_schedule`: warmup and cosine settings
+- `evaluation`: validation and HellaSwag intervals
+- `generation`: prompt/sampling settings
+- `checkpointing`: checkpoint save interval
+- `runtime`: `use_compile`, matmul precision, default single-process CUDA index
+- `logging`: log directory
+
+Tokens processed per optimizer step are globally fixed by:
+
+`tokens_per_step = total_batch_size`
+
+because:
+
+`grad_accum_steps = total_batch_size / (micro_batch_size * sequence_length * world_size)`
+
+and:
+
+`tokens_per_step = micro_batch_size * sequence_length * grad_accum_steps * world_size`
+
+## Running Training
+
+### Single GPU (non-DDP)
+
 ```bash
-CUDA_VISIBLE_DEVICES=3,4 torchrun --standalone --nproc_per_node=2 train_gpt2.py
+python scripts/main.py --config config/gpt2_fineweb_default.py
 ```
 
-For all available GPUs on a single machine:
+### Multi-GPU DDP
+
 ```bash
-torchrun --standalone --nproc_per_node=<num_gpus> train_gpt2.py
+NCCL_P2P_LEVEL=NVL CUDA_VISIBLE_DEVICES=0,4,5,6 torchrun --standalone --nproc_per_node=4 scripts/main.py --config config/gpt2_fineweb_default.py
 ```
 
-### Key Configurations
-- **Batch Size**: Set in the `DataLoaderLite` class (`B` parameter).
-- **Sequence Length**: Set in the `DataLoaderLite` class (`T` parameter).
-- **Learning Rate**: Configured in the `configure_optimizers` method.
-- **Model Architecture**: Defined in the `GPTConfig` class.
+Notes:
 
-### Example Output
-During training, the script will log the following metrics:
-- **Step**: Training step number.
-- **Loss**: Cross-entropy loss for the language modeling task.
-- **Learning Rate (lr)**: Current learning rate (changes with warmup and cosine decay schedule).
-- **Gradient Norm**: The norm of the gradients after clipping.
-- **Time**: Time taken for each training step in milliseconds.
-- **Tokens per Second (tok/sec)**: Throughput in tokens processed per second.
+- DDP is auto-enabled when `torchrun` sets `RANK/LOCAL_RANK/WORLD_SIZE`.
+- `CUDA_VISIBLE_DEVICES` chooses physical GPUs.
+- `nproc_per_node` should match the number of visible GPUs.
 
-Example log:
-```
-step 0 | loss: 10.935456 | lr: 0.000060 | norm: 0.9876 | time: 1917.00ms | tok/sec: 8546.68
-step 1 | loss: 9.876543 | lr: 0.000120 | norm: 0.8765 | time: 1800.00ms | tok/sec: 9000.00
-```
+## Logs and Checkpoints
 
-## Model Details
-### GPT Architecture
-- **Embedding Size**: 768
-- **Number of Layers**: 12
-- **Number of Attention Heads**: 12
-- **Context Length**: 1024 tokens
+Run name is built from config filename + key hyperparameters, for example:
 
-### Optimizer
-- **AdamW**: Includes weight decay for regularization.
-- **Fused Kernels**: Enabled if supported by the hardware for faster training.
+`gpt2_fineweb_default__l12_h12_e768__tbs524288_mb32_seq1024_steps10`
 
-### Learning Rate Schedule
-- **Warmup Steps**: Gradual increase in learning rate for the first few steps.
-- **Cosine Decay**: Smooth decay of learning rate after the warmup phase.
+Artifacts:
 
-## Dataset
-The training script uses the `tiny_shakespeare.txt` dataset as an example. Replace this file with your own dataset for custom training. Ensure the dataset is a plain text file.
+- Log file: `log/<run_name>.log`
+- Checkpoint: `log/<run_name>__model_<step>.pt`
 
-## Performance Optimization
-- **Mixed Precision**: Reduces memory usage and speeds up training using `bfloat16`.
-- **Fused Optimizer**: Reduces kernel launch overhead and improves efficiency.
-- **Gradient Clipping**: Stabilizes training by preventing exploding gradients.
-- **Flash Attention**: Implements efficient attention computation using PyTorch's `scaled_dot_product_attention` function. This method reduces memory usage and speeds up training by avoiding the need to explicitly compute and store large attention matrices. It is particularly useful for long sequences and modern GPUs.
+Log lines include:
 
-## Future Work
-- Implement evaluation and inference scripts.
-- Extend the model to support fine-tuning on downstream tasks.
+- Metadata: `run_name ...`, `device ...`, `grad_accum_steps ...`
+- Metrics: `<step> train <loss>`, `<step> val <loss>`, `<step> hella <acc>`
 
-## References
-- [Attention Is All You Need](https://arxiv.org/abs/1706.03762)
-- [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
-- [PyTorch Documentation](https://pytorch.org/docs/stable/index.html)
-- [Flash Attention: Fast and Memory-Efficient Exact Attention with IO-Awareness](https://arxiv.org/abs/2205.14135)
+## Plotting Results
 
+Use the notebook:
 
+`plot_results.ipynb`
 
+It:
+
+- lists available `log/*.log` files,
+- selects one run log (`RUN_LOG_NAME` or latest),
+- parses `train`, `val`, `hella` lines,
+- renders three horizontal plots:
+  - train loss vs step,
+  - validation loss vs step,
+  - HellaSwag accuracy vs step.
+
+## Standalone Utility Scripts
+
+- `hellaswag.py`: evaluate HuggingFace GPT-2 checkpoints directly on HellaSwag.
+- `fineweb.py`: build local token shards from FineWeb-EDU.
+- `train_gpt2.py`: one-file training implementation containing model, data, DDP setup, eval, generation, and training loop.

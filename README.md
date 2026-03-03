@@ -267,12 +267,10 @@ Brief generation details:
 
 ## Next Steps
 
-- Implement and benchmark **gated attention** variants (for example, gated attention blocks or grouped-query variants) vs current baseline.
-- Add **LUCID preconditioner** experiments and compare convergence speed, stability, and final eval metrics against AdamW.
-- Resume training for significantly longer runs (beyond current step count) to improve HellaSwag and generation coherence.
-- Add systematic ablations (attention variant, optimizer/preconditioner, batch size, LR schedule) with tracked results.
+- Implement and benchmark **gated attention** variants vs current baseline.
+- Add **LUCID preconditioner** experiments and compare final eval metrics against current baselines.
+- Resume training for significantly longer runs (beyond current step count) to improve HellaSwag accuracy.
 - Expand evaluation beyond HellaSwag (additional zero-shot/few-shot tasks and perplexity tracking).
-- Add lightweight experiment tracking/reporting so each run logs config + metrics in one place for easy comparison.
 
 ## Repository Layout
 

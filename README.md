@@ -25,7 +25,8 @@ This repository trains a GPT-2 style language model from scratch in PyTorch, eva
 - `train_gpt2.py`: Original monolithic training script retained as a baseline/reference.
 - `fineweb.py`: Utility script to download/tokenize FineWeb-EDU and write shard files.
 - `hellaswag.py`: Utility script to download/render/evaluate HellaSwag examples.
-- `plot_results.ipynb`: Notebook to load one run log and plot metrics side by side.
+- `plot_results.ipynb`: Notebook that selects a run log from `log/`, parses `train/val/hella` entries, and renders the 3 result plots.
+- `assets/plots/plot_results_metrics.png`: Example output figure generated from `plot_results.ipynb` (used in this README).
 - `edu_fineweb10B/`: Local training token shards consumed by the dataloader.
 - `hellaswag/`: Local cache for downloaded HellaSwag JSONL files.
 - `log/`: Run logs (`*.log`) and checkpoint files (`*.pt`).
@@ -124,11 +125,17 @@ Log lines include:
 
 ## Plotting Results
 
-Use the notebook:
+Run this notebook to generate the plots:
 
 `plot_results.ipynb`
 
-It:
+```bash
+jupyter notebook plot_results.ipynb
+```
+
+Then run all cells (or `jupyter lab plot_results.ipynb` if you prefer JupyterLab).
+
+What this notebook does:
 
 - lists available `log/*.log` files,
 - selects one run log (`RUN_LOG_NAME` or latest),
@@ -137,6 +144,10 @@ It:
   - train loss vs step,
   - validation loss vs step,
   - HellaSwag accuracy vs step.
+
+### Example Plots
+
+![Training/Validation/HellaSwag plots from `plot_results.ipynb`](assets/plots/plot_results_metrics.png)
 
 ## Standalone Utility Scripts
 

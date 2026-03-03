@@ -2,6 +2,79 @@
 
 This repository trains a GPT-2 style language model from scratch in PyTorch, evaluates on HellaSwag, generates qualitative samples, writes structured logs/checkpoints, and includes a plotting notebook for run analysis.
 
+## Contents
+
+- [Highlights](#highlights)
+- [What This Repository Does](#what-this-repository-does)
+- [Environment Setup](#environment-setup)
+- [Data Preparation](#data-preparation)
+- [Configuration](#configuration)
+- [Running Training](#running-training)
+- [Logs and Checkpoints](#logs-and-checkpoints)
+- [Plotting Results](#plotting-results)
+- [Generate From Trained Model](#generate-from-trained-model)
+- [Repository Layout](#repository-layout)
+- [Standalone Utility Scripts](#standalone-utility-scripts)
+
+## Highlights
+
+### Training Curves
+
+![Training/Validation/HellaSwag plots from `plot_results.ipynb`](assets/plots/plot_results_metrics.png)
+
+### Prompt and Generated Samples
+
+#### Sample 1
+
+**Prompt**
+
+```text
+Hello, I'm a language model,
+```
+
+**Generated Sample**
+
+```text
+and I like to use them for learning but still use them as long as my students don't do anything crazy. And as a teacher, I've heard quite a few of the words (and sometimes you're lucky to have the opportunity!), but what I'm really afraid of is
+```
+
+#### Sample 2
+
+**Prompt**
+
+```text
+The future of AI is
+```
+
+**Generated Sample**
+
+```text
+in the making. The Internet has many good aspects of its own for humanity that are being neglected and neglected by the governments, corporations, and nonprofits that we humans are working to eliminate. These are a few things AI can do that promise us to never forget.
+A few years ago, the
+```
+
+#### Sample 3
+
+**Prompt**
+
+```text
+In a shocking finding, researchers discovered that
+```
+
+**Generated Sample**
+
+```text
+the brain was not only able to regulate appetite with a healthy appetite hormone, the hormone leptin. Instead it produced a molecule that was able to kill off brain tumor cells.
+"Now we see these cells dying and dying and growing. We think this is a proof of the
+```
+
+### How These Samples Were Generated (Brief)
+
+- Checkpoint: `log/gpt2_fineweb_default__l12_h12_e768__tbs524288_mb32_seq1024_steps19073__model_10000.pt`
+- Script: `scripts/generate_from_checkpoint.py`
+- Sampling config: `max_length=64`, `top_k=50`, `sample_seed=42`, `num_return_sequences=1`
+- Prompt-specific runs use the same command with different `--prompt` values
+
 ## What This Repository Does
 
 - Implements a GPT-2 architecture from scratch (attention, MLP, residual blocks, weight tying, custom init).
@@ -11,26 +84,6 @@ This repository trains a GPT-2 style language model from scratch in PyTorch, eva
 - Generates sample completions during training.
 - Saves logs and model checkpoints with descriptive run names derived from config values.
 - Plots training/validation/hellaswag metrics from log files in a notebook.
-
-## Repository Layout
-
-- `scripts/main.py`: Main entrypoint for modular, config-driven training.
-- `scripts/training.py`: Training loop, LR schedule, eval cadence, checkpointing, throughput reporting.
-- `scripts/model.py`: GPT model, blocks, optimizer setup, optional HF pretrained weight loading helper.
-- `scripts/dataloader.py`: Shard-based train/val dataloader over local `.npy` token shards.
-- `scripts/evaluation.py`: Validation loss, HellaSwag scoring, and text generation helpers.
-- `scripts/ddp.py`: DDP bootstrap/cleanup and device selection logic.
-- `scripts/generate_from_checkpoint.py`: Inference entrypoint to sample text from a saved `.pt` checkpoint.
-- `scripts/utils.py`: Config loading, run-name construction, log/checkpoint file helpers.
-- `config/gpt2_fineweb_default.py`: Default hyperparameter config used by `scripts/main.py`.
-- `train_gpt2.py`: Original monolithic training script retained as a baseline/reference.
-- `fineweb.py`: Utility script to download/tokenize FineWeb-EDU and write shard files.
-- `hellaswag.py`: Utility script to download/render/evaluate HellaSwag examples.
-- `plot_results.ipynb`: Notebook that selects a run log from `log/`, parses `train/val/hella` entries, and renders the 3 result plots.
-- `assets/plots/plot_results_metrics.png`: Example output figure generated from `plot_results.ipynb` (used in this README).
-- `edu_fineweb10B/`: Local training token shards consumed by the dataloader.
-- `hellaswag/`: Local cache for downloaded HellaSwag JSONL files.
-- `log/`: Run logs (`*.log`) and checkpoint files (`*.pt`).
 
 ## Environment Setup
 
@@ -146,13 +199,11 @@ What this notebook does:
   - validation loss vs step,
   - HellaSwag accuracy vs step.
 
-### Example Plots
-
-![Training/Validation/HellaSwag plots from `plot_results.ipynb`](assets/plots/plot_results_metrics.png)
+The example plot is shown at the top under **Highlights**.
 
 ## Generate From Trained Model
 
-Run this file with multiple prompts from a saved checkpoint:
+Run this with multiple prompts from a saved checkpoint:
 
 ```bash
 CKPT=log/gpt2_fineweb_default__l12_h12_e768__tbs524288_mb32_seq1024_steps19073__model_10000.pt
@@ -179,35 +230,33 @@ python scripts/generate_from_checkpoint.py --checkpoint "$CKPT" \
   --sample-seed 42
 ```
 
-Prompts used in these examples:
+Brief generation details:
 
-- `Hello, I'm a language model,`
-- `The future of AI is`
-- `In a shocking finding, researchers discovered that`
+- Checkpoint used: `...steps19073__model_10000.pt`
+- Prompts: `Hello, I'm a language model,`, `The future of AI is`, `In a shocking finding, researchers discovered that`
+- Sampling: `top-k=50`, `sample_seed=42`, one return sequence per prompt
+- Max token length per sample: `64`
+- Prompt-only and sample-only formatted outputs are highlighted at the top under **Highlights**
 
-Example outputs from checkpoint `...__model_10000.pt`:
+## Repository Layout
 
-```text
-checkpoint: log/gpt2_fineweb_default__l12_h12_e768__tbs524288_mb32_seq1024_steps19073__model_10000.pt
-device: cuda
-prompt: "Hello, I'm a language model,"
-max_length: 64, top_k: 50, sample_seed: 42
-rank 0 sample 0: Hello, I'm a language model, and I like to use them for learning but still use them as long as my students don't do anything crazy. And as a teacher, I've heard quite a few of the words (and sometimes you're lucky to have the opportunity!), but what I'm really afraid of is
-
-checkpoint: log/gpt2_fineweb_default__l12_h12_e768__tbs524288_mb32_seq1024_steps19073__model_10000.pt
-device: cuda
-prompt: 'The future of AI is'
-max_length: 64, top_k: 50, sample_seed: 42
-rank 0 sample 0: The future of AI is in the making. The Internet has many good aspects of its own for humanity that are being neglected and neglected by the governments, corporations, and nonprofits that we humans are working to eliminate. These are a few things AI can do that promise us to never forget.
-A few years ago, the
-
-checkpoint: log/gpt2_fineweb_default__l12_h12_e768__tbs524288_mb32_seq1024_steps19073__model_10000.pt
-device: cuda
-prompt: 'In a shocking finding, researchers discovered that'
-max_length: 64, top_k: 50, sample_seed: 42
-rank 0 sample 0: In a shocking finding, researchers discovered that the brain was not only able to regulate appetite with a healthy appetite hormone, the hormone leptin. Instead it produced a molecule that was able to kill off brain tumor cells.
-"Now we see these cells dying and dying and growing. We think this is a proof of the
-```
+- `scripts/main.py`: Main entrypoint for modular, config-driven training.
+- `scripts/training.py`: Training loop, LR schedule, eval cadence, checkpointing, throughput reporting.
+- `scripts/model.py`: GPT model, blocks, optimizer setup, optional HF pretrained weight loading helper.
+- `scripts/dataloader.py`: Shard-based train/val dataloader over local `.npy` token shards.
+- `scripts/evaluation.py`: Validation loss, HellaSwag scoring, and text generation helpers.
+- `scripts/ddp.py`: DDP bootstrap/cleanup and device selection logic.
+- `scripts/generate_from_checkpoint.py`: Inference entrypoint to sample text from a saved `.pt` checkpoint.
+- `scripts/utils.py`: Config loading, run-name construction, log/checkpoint file helpers.
+- `config/gpt2_fineweb_default.py`: Default hyperparameter config used by `scripts/main.py`.
+- `train_gpt2.py`: Original monolithic training script retained as a baseline/reference.
+- `fineweb.py`: Utility script to download/tokenize FineWeb-EDU and write shard files.
+- `hellaswag.py`: Utility script to download/render/evaluate HellaSwag examples.
+- `plot_results.ipynb`: Notebook that selects a run log from `log/`, parses `train/val/hella` entries, and renders the 3 result plots.
+- `assets/plots/plot_results_metrics.png`: Example output figure generated from `plot_results.ipynb` (used in this README).
+- `edu_fineweb10B/`: Local training token shards consumed by the dataloader.
+- `hellaswag/`: Local cache for downloaded HellaSwag JSONL files.
+- `log/`: Run logs (`*.log`) and checkpoint files (`*.pt`).
 
 ## Standalone Utility Scripts
 
